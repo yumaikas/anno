@@ -13,7 +13,19 @@ Right now, it recognizes the following annotations to text files:
 @til[Description here  | on: Date in YYYY-mm-dd format]
 ```
 
-Example usage:
+It uses the JD_FOLDER environment variable to know where the JD folder structure is.
 
+Example usage output:
 
-anno agenda
+```
+Supported subcommands:\n
+    areas             - Prints out a list of the JD areas in $JD_FOLDER\n
+    debug-dump        - Prints out a list of all recognized annotations and their data\n
+    agenda            - Prints out @todos and @appts (appointments)\n
+    review            - Prints out @tils 
+    help <subcommand> - Shows help for a given subcommand\n
+```
+
+# Status
+
+This is currently in alpha, with hopes for it to be useful for my personal use.
