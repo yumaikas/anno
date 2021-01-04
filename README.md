@@ -19,11 +19,11 @@ Example usage output:
 
 ```
 Supported subcommands:\n
-    areas             - Prints out a list of the JD areas in $JD_FOLDER\n
-    debug-dump        - Prints out a list of all recognized annotations and their data\n
-    agenda            - Prints out @todos and @appts (appointments)\n
+    areas             - Prints out a list of the JD areas in $JD_FOLDER
+    debug-dump        - Prints out a list of all recognized annotations and their data
+    agenda            - Prints out @todos and @appts (appointments)
     review            - Prints out @tils 
-    help <subcommand> - Shows help for a given subcommand\n
+    help <subcommand> - Shows help for a given subcommand
 ```
 
 # Status
