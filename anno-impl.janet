@@ -12,6 +12,16 @@
     ".dll" true
 })
 
+(defn- os/is-dir? [path] 
+    (if-let [info (os/stat path)]
+        (= (info :mode) :directory)
+        false))
+        
+(defn- os/is-file? [path] 
+    (if-let [info (os/stat path)]
+        (= (info :mode) :file)
+        false))
+
 (defn- base-show-file? [path] 
     (not (or
         (string/has-prefix? "." (path/basename path))
@@ -24,6 +34,7 @@
     (not (or
         (string/has-prefix? "." (path/basename path))
         (if (string/find ".git" path) true false)
+        (os/is-file? (path/join path ".anno-ignore"))
     ))
 )
 
