@@ -197,7 +197,7 @@
         
         (if (<= last-saturday learned-ts saturday)
         {
-            :filename (path/basename path)
+            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
             :desc (string/join (get-in hit [:args :pos]) "\r\n")
             :learned-ts learned-ts
             :learned-on (date/to-ymdstr learned-on)
@@ -260,7 +260,7 @@
         # ; If this todo is due this week.
         (if (<= last-saturday due-ts saturday)
         {
-            :filename (path/basename path)
+            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
             :desc (string/join (get-in hit [:args :pos]) "\r\n")
             :due-ts due-ts
             :due (date/to-ymdstr due-date)
@@ -290,7 +290,7 @@
         (def last-saturday (date/add-time saturday {:days -7}))
         (if (<= last-saturday date-of-ts saturday)
         {
-            :filename (path/basename path)
+            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
             :desc (string/join (get-in hit [:args :pos]) "\r\n")
             :date-of (date/to-ymdstr date-of)
             :date-of-ts date-of-ts 
