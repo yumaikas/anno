@@ -173,65 +173,147 @@
     )
 )
 
+(defn- proc-dated-entry [path hit spec] 
+    (defn hit-data [key &opt dflt] 
+        (get-in hit [:args :kv key] dflt)
+    )
+    (var date-on nil)
+    (var date-ts nil)
+    (if-let [
+        l-date-on (hit-data (spec :datefield))
+        parsed-date-on (date/parse-ymdstr l-date-on)]
+        (do 
+            (set date-on (os/date parsed-date-on))
+            (set date-ts parsed-date-on)
+        )
+        (break nil)
+    )
+    (def saturday (date/next "Saturday"))
+    (def last-saturday (date/add-time saturday {:days -7}))
+    
+    (if (<= last-saturday date-ts saturday)
+    {
+        :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
+        :desc (string/join (get-in hit [:args :pos]) "\r\n")
+        (keyword (spec :prefix) "-ts") date-ts
+        (keyword (spec :prefix) "-on") (date/to-ymdstr date-on)
+        :pp (spec :pp) 
+    })
+)
+
+
+(defn- print-hits [hits spec] 
+    (if (> (length hits) 0)
+        (do
+            (print "")
+            (print (spec :title))
+            (print "")
+            (each h hits 
+                (:pp h)
+            )
+        )
+        (print (spec :if-empty))
+    )
+)
+
+(defn entry-fn [proc-hit] 
+    (fn [path]
+        (def to-search (slurp path))
+        (def results (anno-scan to-search))
+        (each hit results
+            (proc-hit path hit)
+        )
+    )
+)
+
+
 (defn- review [path] 
     # ; Today I learned something
     (def til @[])
     
-    (defn proc-til [path hit] 
-        (defn hit-data [key &opt dflt] 
-            (get-in hit [:args :kv key] dflt)
-        )
-        (var learned-on nil)
-        (var learned-ts nil)
-        (if-let [
-            til-on (hit-data "on")
-            parsed-til-on (date/parse-ymdstr til-on)]
-            (do 
-                (set learned-on (os/date parsed-til-on))
-                (set learned-ts parsed-til-on)
-            )
-            (break nil)
-        )
-        (def saturday (date/next "Saturday"))
-        (def last-saturday (date/add-time saturday {:days -7}))
-        
-        (if (<= last-saturday learned-ts saturday)
-        {
-            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
-            :desc (string/join (get-in hit [:args :pos]) "\r\n")
-            :learned-ts learned-ts
-            :learned-on (date/to-ymdstr learned-on)
-            :pp (fn [self] 
-                (print (string "date: " (self :learned-on) " | " (self :desc) " | filename: " (self :filename)))
-            )
-        })
-    )
-    
+    # ; Closes over the til collection
     (defn proc-hit [path hit]
         (match (hit :type)
-            "til" (array/push-not-nil til (proc-til path hit))
+            "til" (array/push-not-nil til (proc-dated-entry path hit {
+                :prefix "learned"
+                :datefield "on"
+                :pp (fn [self] 
+                    (print (string "date: " (self :learned-on) " | " (self :desc) " | filename: " (self :filename)))
+                )
+            }))
         )
     )
 
-    (defn entry [p] 
-        (def to-search (slurp p))
-        (def results (anno-scan to-search))
-        (each hit results
-            (proc-hit p hit)
-        )
-    )
-    (walk-rec path entry)
+    (walk-rec path (entry-fn proc-hit))
     
-    (print "")
-    (if (> (length til) 0)
-        (do
-            (print "# Learning review")
-            (each t til 
-                (:pp t)
-            )
-        )
-        (print "No TILs this week.")
+    (print-hits til 
+        {:title "# Learning review"
+        :if-empty "No TILs this week"})
+)
+
+(defn- proc-flaggable-entry [path hit spec] 
+    (defn hit-data [key &opt dflt] 
+        (get-in hit [:args :kv key] dflt)
     )
+    (def status (hit-data (spec :status-field)))
+    
+    (if ((spec :show?) status)
+    {
+        :id (hit-data "id")
+        :project (hit-data "project" nil)
+        :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
+        :desc (string/join (get-in hit [:args :pos]) "\r\n")
+        :status status
+        :pp (spec :pp) 
+    })
+)
+
+(defn- scan-tasks [path] 
+    (def tasks @[])
+    
+    (defn proc-hit [path hit]
+        (match (hit :type)
+            "task" (array/push-not-nil tasks (proc-flaggable-entry path hit {
+                :show? (fn [status] (not= status "done"))
+                :status-field "status"
+                :pp (fn [self] 
+                    (prin (string "id: " (self :id) " | " (self :desc)))
+                    (if (self :project) 
+                        (prin (string " | project: " (self :project))))
+                    (prin (string " | filename: " (self :filename)))
+                    (print "")
+                )
+            }))
+        )
+    )
+    (walk-rec path (entry-fn proc-hit))
+    (print-hits tasks 
+        {:title "# Tasks"
+        :if-empty "No tasks are currently incomplete"})
+)
+
+(defn- scan-projects [path]
+    (def projects @[])
+    
+    (defn proc-hit [path hit]
+        (match (hit :type)
+            "project" (array/push-not-nil projects (proc-flaggable-entry path hit {
+                :show? (fn [status] (not= status "done"))
+                :status-field "status"
+                :pp (fn [self] 
+                    (prin (string "id: " (self :id) " | " (self :desc)))
+                    (if (self :project) 
+                        (prin (string " | project: " (self :project))))
+                    (prin (string " | filename: " (self :filename)))
+                    (print "")
+                )
+            }))
+        )
+    )
+    (walk-rec path (entry-fn proc-hit))
+    (print-hits projects 
+        {:title "# Projects"
+        :if-empty "You don't have any projects defined"})
 )
 
 (defn- agenda [path] 
@@ -240,100 +322,33 @@
     # ; Appointments, which Will Not Be Missed
     (def appt @[])
     
-    (defn proc-todo [path hit]
-        (var due-date nil)
-        (var due-ts nil)
-        (defn hit-data [key &opt dflt] 
-            (get-in hit [:args :kv key] dflt)
-        )
-        (if-let [
-            due (hit-data "due")
-            parsed-due (date/parse-ymdstr due)] 
-            (do 
-                (set due-date (os/date parsed-due))
-                (set due-ts parsed-due)
-            )
-            (break nil)
-        )
-        (def saturday (date/next "Saturday"))
-        (def last-saturday (date/add-time saturday {:days -7}))
-        # ; If this todo is due this week.
-        (if (<= last-saturday due-ts saturday)
-        {
-            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
-            :desc (string/join (get-in hit [:args :pos]) "\r\n")
-            :due-ts due-ts
-            :due (date/to-ymdstr due-date)
-            :pp (fn [self] 
-                (print (string "due: " (self :due) " | " (self :desc) " | filename: " (self :filename)))
-            )
-        })
-    )
-    
-    (defn proc-appt [path hit] 
-        (defn hit-data [key &opt dflt] 
-            (get-in hit [:args :kv key] dflt)
-        )
-        (var date-of nil)
-        (var date-of-ts nil)
-        (if-let [
-            dt-of (hit-data "date")
-            parsed-date-of (date/parse-ymdstr dt-of)]
-            (do 
-                (set date-of (os/date parsed-date-of))
-                (set date-of-ts parsed-date-of)
-            )
-            (break nil)
-        )
-        
-        (def saturday (date/next "Saturday"))
-        (def last-saturday (date/add-time saturday {:days -7}))
-        (if (<= last-saturday date-of-ts saturday)
-        {
-            :filename (path/join (splice (array/slice (path/parts path) -3 -1)))
-            :desc (string/join (get-in hit [:args :pos]) "\r\n")
-            :date-of (date/to-ymdstr date-of)
-            :date-of-ts date-of-ts 
-            :pp (fn [self] 
-                (print (string "date: " (self :date-of) " | " (self :desc) " | filename: " (self :filename)))
-            )
-        })
-    )
-    
     (defn proc-hit [path hit]
         (match (hit :type)
-            "todo" (array/push-not-nil todos (proc-todo path hit)) 
-            "appt" (array/push-not-nil appt (proc-appt path hit))
+            "todo" (array/push-not-nil todos (proc-dated-entry path hit {
+                :datefield "due"
+                :prefix "due"
+                :pp (fn [self] 
+                    (print (string "due: " (self :due-on) " | " (self :desc) " | filename: " (self :filename)))
+                )
+            })) 
+            "appt" (array/push-not-nil appt (proc-dated-entry path hit {
+                :prefix "date-of"
+                :datefield "date"
+                :pp (fn [self] 
+                    (print (string "date: " (self :date-of-on) " | " (self :desc) " | filename: " (self :filename)))
+                )
+            }))
         )
     )
 
-    (defn entry [p] 
-        (def to-search (slurp p))
-        (def results (anno-scan to-search))
-        (each hit results
-            (proc-hit p hit)
-        )
-    )
-    (walk-rec path entry)
+    (walk-rec path (entry-fn proc-hit))
     
-    (if (> (length appt) 0)
-        (do
-            (print "")
-            (print "# Appointments")
-            (print "")
-            (each a (sort-by (fn [t] (t :date-of-ts)) appt )
-                (:pp a)
-            )))
-    (if (> (length todos) 0)
-        (do 
-            (print "")
-            (print "# Todos this week")
-            (print "")
-            (each t (sort-by (fn [t] (t :due-ts)) todos)
-                (:pp t)
-            )
-        )
-    )
+    (print-hits appt 
+        {:title "# Appointments"
+        :if-empty ""})
+    (print-hits todos 
+        {:title "# Todos this week"
+        :if-empty ""})
 )
 
 (defn- jd-areas [dir] 
@@ -411,6 +426,8 @@ Supported subcommands:\n
     (match subcommand 
         "areas" (jd-areas (dyn :jd-folder))
         "agenda" (agenda (dyn :jd-folder))
+        "projects" (scan-projects (dyn :jd-folder))
+        "tasks" (scan-tasks (dyn :jd-folder))
         "review" (review (dyn :jd-folder))
         "debug-dump" (scan-rec (dyn :jd-folder))
         "help" (detailed-help args)
