@@ -1,5 +1,5 @@
-(import "path")
-(import "date")
+(import path)
+(import ./date)
 
 (var *exclude-exts* @{
     ".png" true
@@ -31,11 +31,14 @@
 )
 
 (defn- base-list-dir? [path] 
-    (not (or
-        (string/has-prefix? "." (path/basename path))
-        (if (string/find ".git" path) true false)
-        (os/is-file? (path/join path ".anno-ignore"))
-    ))
+    (and 
+        (= (slice ((os/stat path) :permissions) 0 3) "rwx")
+        (not (or
+            (string/has-prefix? "." (path/basename path))
+            (if (string/find ".git" path) true false)
+            (os/is-file? (path/join path ".anno-ignore"))
+        ))
+    )
 )
 
 (defn- walk-rec [path func &opt list-dir? show-file?] 
@@ -158,15 +161,15 @@
     )
 )
 
-(defn- scan-rec [path]
-    (walk-rec path scan-file)
+(defn- scan-rec [args]
+    (walk-rec (dyn :jd-folder) scan-file)
 )
 
 (defn- is-todo-valid? [todo] 
    true 
 )
 
-(defn- array/push-not-nil [arr val] 
+(defn array/push-not-nil [arr val] 
     (match val
         nil ()
         x (array/push arr val)
@@ -202,7 +205,7 @@
 )
 
 
-(defn- print-hits [hits spec] 
+(defn print-hits [hits spec] 
     (if (> (length hits) 0)
         (do
             (print "")
@@ -228,6 +231,7 @@
 
 
 (defn- review [path] 
+    (def path (dyn :jd-folder))
     # ; Today I learned something
     (def til @[])
     
@@ -268,7 +272,8 @@
     })
 )
 
-(defn- scan-tasks [path] 
+(defn- scan-tasks [args] 
+    (def path (dyn :jd-folder))
     (def tasks @[])
     
     (defn proc-hit [path hit]
@@ -292,7 +297,8 @@
         :if-empty "No tasks are currently incomplete"})
 )
 
-(defn- scan-projects [path]
+(defn- scan-projects [args]
+    (def path (dyn :jd-folder))
     (def projects @[])
     
     (defn proc-hit [path hit]
@@ -316,7 +322,8 @@
         :if-empty "You don't have any projects defined"})
 )
 
-(defn- agenda [path] 
+(defn- agenda [args] 
+    (def path (dyn :jd-folder))
     # ; Todos are things that should be done during a given period of time
     (def todos @[])
     # ; Appointments, which Will Not Be Missed
@@ -351,7 +358,21 @@
         :if-empty ""})
 )
 
-(defn- jd-areas [dir] 
+(var- *commands* @{})
+(var- *command-order* @[])
+
+(defn add-command [func name desc &opt long-desc] 
+    (array/push *command-order* name)
+    (put *commands* name { 
+        :name name
+        :short-desc desc
+        :long-desc (or long-desc "")
+        :func func 
+    })
+)
+
+(defn- jd-areas [args] 
+    (def dir (dyn :jd-folder))
     (def area-name-pat (peg/compile ~{
         :jd-dig (between 1 2 (range "09"))
         :jd-prefix (* :jd-dig "-" :jd-dig)
@@ -374,6 +395,25 @@
     (walk-rec-dirs dir print-if-area)
 )
 
+(defn print-lines [& lines] 
+    (each l lines (print l))
+)
+
+(defn- string/pad-right
+  "Pad a string on the right with some spaces."
+  [str n]
+  (def len (length str))
+  (if (>= len n)
+    str
+    (string str (string/repeat " " (- n len))))
+)
+
+(defn- string/pad-left [str n] 
+  "Pad a string on the left with some spaces."
+  (def len (length str))
+  (if (>= len n)
+    str
+    (string (string/repeat " " (- n len)) str)))
 
 (defn- usage [] 
     (comment 
@@ -382,60 +422,95 @@
         cap(ture)         - Capture a @todo to \"$JD_FOLDER/1 Captures\"\n
         "
     )
-    (print "anno <subcommand> args\n
-\n
-Supported subcommands:\n
-    areas             - Prints out a list of the JD areas in $JD_FOLDER\n
-    debug-dump        - Prints out a list of all recognized annotations and their data\n
-    agenda            - Prints out @todos and @appts (appointments)\n
-    tasks             - Prints out @tasks\n
-    projects          - Prints out @projects\n
-    review            - Prints out @tils\n
-    help <subcommand> - Shows help for a given subcommand\n
-    ")
+    
+    (print "anno <subcommand> args")
+    (print "")
+    (print "Supported subcommands:")
+    (print "")
+    (def max-name-len (max (splice (map (fn [c] (length (c :name))) *commands*))))
+    (each cname *command-order*
+        (def c (*commands* cname))
+        (print (string 
+            "    " 
+            (string/pad-right (c :name) (+ 2 max-name-len) )
+            " - "
+            (c :short-desc)
+        ))
+    )
 )
 
 (defn- detailed-help [args] 
-    (def help @[
+    (print-lines
         "Anno(tations) is a program that scans a directory laid out according to the"
         "Johnny Decimal system."
         "It scans for annotations that look like so: @todo[Get Milk|start:2021-1-4|due:2021-1-5]"
         ""
         "Annot(tations). Copyright 2020 Andrew Owen" 
-    ])
-    (each l help (print l))
+    )
+)
+
+(def- ignore-text "This file tells anno to ignore this directory")
+(defn- ignore [args] 
+    (cond 
+        (= (length args) 1) (spit (path/join (args 0) ".anno-ignore") ignore-text)
+        (= (length args) 0) (spit ".anno-ignore" ignore-text)
+        true (print "Please only give one arg to the ignore subcommand!")
+    )
+)
+
+(defn- dir-stats [args] 
+    (def stats @{})
+    (defn count [p] 
+        (fn [path] 
+            (put stats p (+ (get stats p 0) 1)))
+    )
+    (each p (os/dir ".")
+        (when (and (os/is-dir? p) (base-list-dir? p))
+            (pp p)
+            (walk-rec p (count p))
+        )
+    )
+    
+    (each (k v) (pairs stats) 
+        (print (string "Directory " k " has " v " files"))
+    )
+    (match (length stats)
+        0 (print "No subdirectories here scanned by anno"))
 )
 
 (defn main [& args] 
     
+    (add-command jd-areas      "areas"      "Prints out a list of the JD areas in $JD_FOLDER" "")
+    (add-command agenda        "agenda"     "Prints out @todos and @appts" "")
+    (add-command scan-tasks    "tasks"      "Prints out @tasks" "")
+    (add-command scan-projects "projects"   "Prints out @projects" "")
+    (add-command review        "review"     "Prints out @tils")
+    (add-command ignore        "ignore"     "Tells anno to ignore the current directory")
+    (add-command dir-stats     "dir-stats"  "Count all of the files that are scanned by anno. Use when anno gets slow")
+    # ; TODO: load in extensions here
+    (add-command scan-rec      "debug-dump" "Prints out a list of all recognized annotations and their data")
+    (add-command detailed-help "help"       "Shows help for a given subcommand")
+    
     (def args (array/concat @[] args))
     (setdyn :jd-folder (os/getenv "JD_FOLDER" "."))
+    
     # ; Pop off the script name
     (array/shift args)
-
     # ; Do we have any arguments left?
     (match (length args) 
         0 (do
             (print "No subcommand given")
             (usage)
-            (break)
-          )
+            (break))
         _ ()
     )
     
     # ; Get the script subcommand
     (def subcommand (array/shift args))
-    (match subcommand 
-        "areas" (jd-areas (dyn :jd-folder))
-        "agenda" (agenda (dyn :jd-folder))
-        "projects" (scan-projects (dyn :jd-folder))
-        "tasks" (scan-tasks (dyn :jd-folder))
-        "review" (review (dyn :jd-folder))
-        "debug-dump" (scan-rec (dyn :jd-folder))
-        "help" (detailed-help args)
-        _ (do 
-            (print (string "Unrecognized subcommand " subcommand))
-            (usage)
-            )
+    
+    (defn usage- [] 
+        (print (string "Unrecognized subcommand: " subcommand))
+        (usage)
     )
+    ((get-in *commands* @[subcommand :func] usage-) args)
 )

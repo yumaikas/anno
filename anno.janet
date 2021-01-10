@@ -1,3 +1,3 @@
-(import "anno-impl")
+(import ./anno-impl)
 
 (anno-impl/main (splice (dyn :args)))
