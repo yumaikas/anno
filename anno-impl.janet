@@ -1,62 +1,11 @@
 (import path)
 (import ./date)
+(import ./plugins)
+(use ./lib-anno)
 
-(var *exclude-exts* @{
-    ".png" true
-    ".docx" true
-    ".ttf" true
-    ".jpg" true
-    ".jpeg" true
-    ".so" true
-    ".exe" true
-    ".dll" true
-})
-
-(defn- os/is-dir? [path] 
-    (if-let [info (os/stat path)]
-        (= (info :mode) :directory)
-        false))
-        
-(defn- os/is-file? [path] 
-    (if-let [info (os/stat path)]
-        (= (info :mode) :file)
-        false))
-
-(defn- base-show-file? [path] 
-    (not (or
-        (string/has-prefix? "." (path/basename path))
-        (get *exclude-exts* (path/ext path) false)
-        (if (string/find ".git" path) true false)
-    ))
-)
-
-(defn- base-list-dir? [path] 
-    (and 
-        (= (slice ((os/stat path) :permissions) 0 3) "rwx")
-        (not (or
-            (string/has-prefix? "." (path/basename path))
-            (if (string/find ".git" path) true false)
-            (os/is-file? (path/join path ".anno-ignore"))
-        ))
-    )
-)
-
-(defn- walk-rec [path func &opt list-dir? show-file?] 
-    (if (not= (string/find ".git" path) nil)
-        (break)
-    )
-    (default list-dir? base-list-dir?)
-    (default show-file? base-show-file?)
-    (each p (os/dir path)
-        (def currP (path/abspath (path/join path p)))
-        (def info (os/stat currP))
-        (match (info :mode)
-            :file (if (show-file? currP) (func currP))
-            :directory (if (list-dir? currP) (walk-rec currP func))
-            _ false
-        )
-    )
-)
+# @task[Add a defer status to tasks to remove them from show up by default (but maybe show a count?)]
+# @task[Multithread this as much as makese sense]
+# @task[Figure out how to profile how much time is spent in a given dir]
 
 (defn- walk-rec-dirs [path func &opt list-dir?] 
     (if (not= (string/find ".git" path) nil)
@@ -83,70 +32,7 @@
     (walk-rec path (fn [x] (print x)))
 )
 
-(defn array/shift [arr] 
-    (def ret (arr 0))
-    (array/remove arr 0)
-    ret
-)
 
-(defn- proc-anno-match [& args] 
-    (def args (array (splice args)))
-    (if (< (length args) 2) 
-        (break nil)
-    )
-    (def start-pos (array/shift args))
-    (def end-pos (array/pop args))
-    (def type (string/trim (array/shift args)))
-    (def args (map (fn [x] (string/trim x " \t\n:")) args))
-    
-    (def dict-args @{})
-    (def pos-args @[])
-    # So, now that we've shifted everything off, we can do some stuff
-    (loop 
-        [i :range [0 (length args) 2]]
-        (def k (args i))
-        (def v (args (+ i 1)))
-        (match k 
-            "" (array/push pos-args v)
-            _  (put dict-args k v)
-        )
-    )
-    
-    (def ret 
-    @{ 
-        :range ~(,start-pos ,end-pos)
-        :type type
-        :args @{
-            :kv dict-args
-            :pos pos-args
-        }
-    })
-    ret
-)
-
-(defn anno-scan [data] 
-    (def anno-pat (peg/compile ~{
-        :id-char (* (+ "-" "+" (range "09" "az" "AZ")))
-        :anno-key (* (some :id-char) ":")
-        :anno-value (* 
-            (any " ")
-            (any 
-                (+ 
-                    (* "[" :anno-value "]") 
-                    (if-not (+ "]" "|") 1)
-        )))
-        :anno-pair (* 
-            (capture (any :anno-key)) 
-            (capture :anno-value)
-            (any "|")
-        )
-        :type (capture (some :id-char))
-        :anno-args (* "[" :s* (any :anno-pair) "]" )
-        :main (any (+ (cmt (* ($) "@" :type :anno-args ($) ) ,proc-anno-match) 1))
-    }))
-    
-    (peg/match anno-pat data)
-)
 
 (defn- scan-file [path] 
     (def to-search (slurp path))
@@ -169,14 +55,8 @@
    true 
 )
 
-(defn array/push-not-nil [arr val] 
-    (match val
-        nil ()
-        x (array/push arr val)
-    )
-)
 
-(defn- proc-dated-entry [path hit spec] 
+(defn proc-dated-entry [path hit spec] 
     (defn hit-data [key &opt dflt] 
         (get-in hit [:args :kv key] dflt)
     )
@@ -192,7 +72,7 @@
         (break nil)
     )
     (def saturday (date/next "Saturday"))
-    (def last-saturday (date/add-time saturday {:days -7}))
+    (def last-saturday (date/add-time saturday :days -7))
     
     (if (<= last-saturday date-ts saturday)
     {
@@ -202,31 +82,6 @@
         (keyword (spec :prefix) "-on") (date/to-ymdstr date-on)
         :pp (spec :pp) 
     })
-)
-
-
-(defn print-hits [hits spec] 
-    (if (> (length hits) 0)
-        (do
-            (print "")
-            (print (spec :title))
-            (print "")
-            (each h hits 
-                (:pp h)
-            )
-        )
-        (print (spec :if-empty))
-    )
-)
-
-(defn entry-fn [proc-hit] 
-    (fn [path]
-        (def to-search (slurp path))
-        (def results (anno-scan to-search))
-        (each hit results
-            (proc-hit path hit)
-        )
-    )
 )
 
 
@@ -255,7 +110,7 @@
         :if-empty "No TILs this week"})
 )
 
-(defn- proc-flaggable-entry [path hit spec] 
+(defn proc-flaggable-entry [path hit spec] 
     (defn hit-data [key &opt dflt] 
         (get-in hit [:args :kv key] dflt)
     )
@@ -294,8 +149,30 @@
     (walk-rec path (entry-fn proc-hit))
     (print-hits tasks 
         {:title "# Tasks"
-        :if-empty "No tasks are currently incomplete"})
-)
+        :if-empty "No tasks are currently incomplete"}))
+(defn- scan-deferred [args] 
+    (def path (dyn :jd-folder))
+    (def tasks @[])
+    
+    (defn proc-hit [path hit]
+        (match (hit :type)
+            "task" (array/push-not-nil tasks (proc-flaggable-entry path hit {
+                :show? (fn [status] (or (= status "deferred") (= status "defer")))
+                :status-field "status"
+                :pp (fn [self] 
+                    (prin (string "id: " (self :id) " | " (self :desc)))
+                    (if (self :project) 
+                        (prin (string " | project: " (self :project))))
+                    (prin (string " | filename: " (self :filename)))
+                    (print "")
+                )
+            }))
+        )
+    )
+    (walk-rec path (entry-fn proc-hit))
+    (print-hits tasks 
+        {:title "# Deferred Tasks"
+        :if-empty "No tasks are currently deferred"}))
 
 (defn- scan-projects [args]
     (def path (dyn :jd-folder))
@@ -358,18 +235,6 @@
         :if-empty ""})
 )
 
-(var- *commands* @{})
-(var- *command-order* @[])
-
-(defn add-command [func name desc &opt long-desc] 
-    (array/push *command-order* name)
-    (put *commands* name { 
-        :name name
-        :short-desc desc
-        :long-desc (or long-desc "")
-        :func func 
-    })
-)
 
 (defn- jd-areas [args] 
     (def dir (dyn :jd-folder))
@@ -487,7 +352,16 @@
     (add-command review        "review"     "Prints out @tils")
     (add-command ignore        "ignore"     "Tells anno to ignore the current directory")
     (add-command dir-stats     "dir-stats"  "Count all of the files that are scanned by anno. Use when anno gets slow")
-    # ; TODO: load in extensions here
+    
+    (comptime
+        (if (os/is-file? "./plugins/init.janet")
+            (do 
+                (import ./plugins)
+                (plugins/plug)
+            )
+        )
+    )
+    
     (add-command scan-rec      "debug-dump" "Prints out a list of all recognized annotations and their data")
     (add-command detailed-help "help"       "Shows help for a given subcommand")
     
@@ -508,9 +382,8 @@
     # ; Get the script subcommand
     (def subcommand (array/shift args))
     
-    (defn usage- [] 
+    (defn usage- [&] 
         (print (string "Unrecognized subcommand: " subcommand))
         (usage)
     )
-    ((get-in *commands* @[subcommand :func] usage-) args)
 )
