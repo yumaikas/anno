@@ -150,6 +150,34 @@
     (print-hits tasks 
         {:title "# Tasks"
         :if-empty "No tasks are currently incomplete"}))
+
+(defn- review-tasks [args] 
+    (def path (dyn :jd-folder))
+    (def tasks @[])
+    
+    (defn proc-hit [path hit]
+        (match (hit :type)
+            "task" (array/push-not-nil 
+                     tasks 
+                     (proc-flaggable-entry 
+                       path
+                       hit 
+                       {
+                        :show? (fn [status] (not= status "done"))
+                        :status-field "status"
+                        :pp (fn [self] 
+                              (prin (string "id: " (self :id) " | " (self :desc)))
+                              (if (self :project) 
+                                (prin (string " | project: " (self :project))))
+                              (prin (string " | filename: " (self :filename)))
+                              (print "")
+                              )
+                        }))))
+    (walk-rec path (entry-fn proc-hit))
+    (print-hits tasks 
+        {:title "# Tasks"
+        :if-empty "No tasks are currently incomplete"}))
+
 (defn- scan-deferred [args] 
     (def path (dyn :jd-folder))
     (def tasks @[])
